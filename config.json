@@ -1,0 +1,7 @@
+{
+  "url_template": "https://sochi.camera:8081/cam_%s/tracks-v1/",
+  "camera_ids": ["s50", "s63", "s71", "98", "245", "279", "251"],
+  "timeout": 60,
+  "clean_up": true,
+  "dir_name": "./"
+}
