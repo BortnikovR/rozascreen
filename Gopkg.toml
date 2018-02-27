@@ -32,7 +32,3 @@
 [[constraint]]
   name = "github.com/grafov/m3u8"
   version = "0.10.0"
-
-[[constraint]]
-  name = "github.com/spf13/viper"
-  version = "1.0.0"
