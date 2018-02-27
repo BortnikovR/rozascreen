@@ -1,23 +1,22 @@
 package screener
 
 import (
-	"github.com/bortnikovr/go/rozascreen/config"
-	"time"
 	"crypto/tls"
-	"net/http"
-	"github.com/grafov/m3u8"
+	"errors"
 	"fmt"
 	"io/ioutil"
+	"log"
+	"net/http"
 	"os"
 	"os/exec"
-	"log"
-	"errors"
+	"sort"
+	"time"
+
+	"github.com/bortnikovr/rozascreen/config"
+	"github.com/grafov/m3u8"
 )
 
-const (
-	plName     = "index.m3u8"
-	tempPrefix = "temp"
-)
+const plName = "index.m3u8"
 
 type Screener struct {
 	config *config.Config
@@ -62,13 +61,13 @@ func (s *Screener) takeScreenshot(camID string) {
 		return
 	}
 
-	fn, err = s.getFile(camID, fn)
+	data, err := s.getData(camID, fn)
 	if err != nil {
 		log.Println("Can't get video file: ", err)
 		return
 	}
 
-	go s.extractFrame(camID, fn)
+	go s.extractFrame(camID, data)
 }
 
 func (s *Screener) getFilename(camID string) (string, error) {
@@ -89,51 +88,55 @@ func (s *Screener) getFilename(camID string) (string, error) {
 	}
 	m, ok := p.(*m3u8.MediaPlaylist)
 	if !ok {
-		return "", err
+		return "", errors.New("wrong playlist type")
 	}
 
 	return m.Segments[0].URI, nil
 }
 
-func (s *Screener) getFile(camID, fn string) (string, error) {
+func (s *Screener) getData(camID, fn string) ([]byte, error) {
 	r, err := s.client.Get(fmt.Sprintf(s.config.UrlTemplate, camID) + fn)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer r.Body.Close()
 
 	if r.StatusCode != http.StatusOK {
-		return "", errors.New(fmt.Sprintf("Invalid status code: %d", r.StatusCode))
+		return nil, errors.New(fmt.Sprintf("Invalid status code: %d", r.StatusCode))
 	}
 
 	err = os.MkdirAll(fmt.Sprintf("%s/%s", s.config.DirName, camID), os.ModePerm)
 	if err != nil {
-		return "", errors.New("Can't create path: " + err.Error())
-	}
-
-	filename := fmt.Sprintf("%s/%s/%s.ts", s.config.DirName, camID, tempPrefix)
-	f, err := os.Create(filename)
-	defer f.Close()
-	if err != nil {
-		return "", errors.New("Can't create file: " + err.Error())
+		return nil, errors.New("Can't create path: " + err.Error())
 	}
 
 	b, err := ioutil.ReadAll(r.Body)
 	if err != nil {
-		return "", errors.New("Can't read body: " + err.Error())
+		return nil, errors.New("Can't read body: " + err.Error())
 	}
-	f.Write(b)
 
-	return filename, nil
+	return b, nil
 }
 
-func (s *Screener) extractFrame(camID, fn string) {
-	cmd := exec.Command("ffmpeg", "-i", fn, "-vframes", "1", "-f", "singlejpeg", "-")
+func (s *Screener) extractFrame(camID string, data []byte) {
+	cmd := exec.Command("ffmpeg", "-i", "-", "-vframes", "1", "-f", "singlejpeg", "-")
+	pipe, err := cmd.StdinPipe()
+	if err != nil {
+		log.Println("Can't create stdin pipe: ", err)
+		return
+	}
+
+	go func() {
+		defer pipe.Close()
+		pipe.Write(data)
+	}()
+
 	buffer, err := cmd.Output()
 	if err != nil {
 		log.Println("Could not generate frame: ", err)
 		return
 	}
+
 	fname := fmt.Sprintf(
 		"%s/%s/%s.jpeg", s.config.DirName, camID, time.Now().Format(time.RFC3339))
 
@@ -146,22 +149,22 @@ func (s *Screener) extractFrame(camID, fn string) {
 	f.Write(buffer)
 
 	if s.config.CleanUp {
-		go s.cleanUp(camID, fname)
+		s.cleanUp(camID)
 	}
 }
 
-func (s *Screener) cleanUp(camID string, fn string) {
+func (s *Screener) cleanUp(camID string) {
 	files, err := ioutil.ReadDir(fmt.Sprintf("%s/%s", s.config.DirName, camID))
 	if err != nil {
 		log.Println(err)
 		return
 	}
 
-	for _, file := range files {
-		path := fmt.Sprintf("%s/%s/%s", s.config.DirName, camID, file.Name())
-		if path == fn {
-			continue
-		}
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].ModTime().Before(files[j].ModTime())
+	})
+	for i := 0; i < len(files)-1; i++ {
+		path := fmt.Sprintf("%s/%s/%s", s.config.DirName, camID, files[i].Name())
 		os.Remove(path)
 	}
 }

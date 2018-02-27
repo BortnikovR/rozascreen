@@ -2,8 +2,8 @@ package config
 
 import (
 	"encoding/json"
-	"io/ioutil"
 	"errors"
+	"io/ioutil"
 	"time"
 )
 

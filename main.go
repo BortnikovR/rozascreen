@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/bortnikovr/go/rozascreen/screener"
+	"github.com/bortnikovr/rozascreen/screener"
 )
 
 func main() {
